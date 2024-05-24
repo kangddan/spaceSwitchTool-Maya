@@ -4,7 +4,9 @@ import PySide2.QtWidgets as QtWidgets
 import PySide2.QtCore    as QtCore
 import PySide2.QtGui     as QtGui
 
-# -----------------------------------------------------------------------------------          
+# -----------------------------------------------------------------------------------    
+
+
 class MetaNode(object):
     INSTANCE_CACHE = {}
     def __new__(cls, *args, **kwargs):
@@ -270,7 +272,7 @@ class MetaUtils(object):
         elif isinstance(uuid, om2.MUuid):
             return uuid.valid()
         return False
-        
+            
 
 # ---------------------------------------------------------------------------------------------------------    
 class LineShape(QtWidgets.QFrame):
@@ -353,19 +355,49 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def showEvent(self, event):
         if self.geometry:
             self.restoreGeometry(self.geometry)
-        self.getMeta()
+        #self.getMeta()
         super(SpaceSwitchUI, self).showEvent(event)
         
+    # --------------------------------------------------------    
+    
     def getMeta(self):
         metaNodes = MetaUtils.getMetaNodes()
         self.targetsBox.clear()
-        self.targetsBox.addItems(['new'] + metaNodes)
+        self.targetsBox.addItem('<New>')
         
-        self._setData()
+        for nodeName in metaNodes:
+            self.targetsBox.addItem(nodeName, MetaNode(nodeName)) # metaNode instance to data
+
+        self.updateData()
+        
+    def resetData(self):
+        self.deleteAllTargetWidget()
+        self.sourceLineEdit.setText('')
+        self.offsetGroupLineEdit.setText('')
+        self.positionCheckBox.setChecked(False)
+        self.rotationCheckBox.setChecked(False)
+        self.scaleCheckBox.setChecked(False)
+        self.parentCheckBox.setChecked(False)
+        
+        self.positionCheckBox.setEnabled(True)
+        self.rotationCheckBox.setEnabled(True)
+        self.sourceUUID = None
+        self.offsetGroupUUID = None
+        
+    def updateData(self):
+        currentIndex = self.targetsBox.currentIndex()
+        currentItemData = self.targetsBox.itemData(currentIndex)
+        if currentItemData is not None and isinstance(currentItemData, MetaNode):
+            self.setWidgetData(currentItemData.getData()) # get metaNode instance data
+        else:   
+            self.resetData()
+    
+    # --------------------------------------------------------
             
     def closeEvent(self, event):
         super(SpaceSwitchUI, self).closeEvent(event)
         self.geometry = self.saveGeometry()
+        #self.getMeta()
         
     @classmethod
     def displayUI(cls):
@@ -394,6 +426,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.createConnections()
         self.sourceUUID = None
         self.offsetGroupUUID = None
+        self.getMeta()
 
 
         
@@ -507,30 +540,11 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         The activated signal is only emitted when the user manually selects an item
         it will not be triggered by programmatically selecting an item
         '''
-        self.targetsBox.activated.connect(self._setData)
-        
-    def resetData(self):
-        self.deleteAllTargetWidget()
-        self.sourceLineEdit.setText('')
-        self.offsetGroupLineEdit.setText('')
-        self.positionCheckBox.setChecked(False)
-        self.rotationCheckBox.setChecked(False)
-        self.scaleCheckBox.setChecked(False)
-        self.parentCheckBox.setChecked(False)
-        
-        self.positionCheckBox.setEnabled(True)
-        self.rotationCheckBox.setEnabled(True)
-        self.sourceUUID = None
-        self.offsetGroupUUID = None
-        
-    def _setData(self):
-        itemText = self.targetsBox.currentText()
-        if itemText in MetaUtils.getMetaNodes():
-            self.setWidgetData(MetaNode(itemText).getData())
-        else:
-            self.resetData()
-   
+        self.targetsBox.activated.connect(self.updateData)
+  
     # --------------------------------------------------------------------------    
+
+    
     def parentTo(self):
         isParent = self.parentCheckBox.isChecked()
         if isParent:
@@ -607,8 +621,17 @@ class SpaceSwitchUI(QtWidgets.QDialog):
  
         return targetWidgets
         
+    def checkDuplicateUUID(self, data):
+        uuids = set()
+        for item in data.values():
+            uuid = item['spaceTarget']
+            if uuid in uuids:
+                return False
+            uuids.add(uuid)
+        return True
+        
     # ---------------------------------------------------------------
-    # get data
+
     def getWidgetData(self):
         data = {}
         data['source']      = self.sourceUUID
@@ -651,16 +674,17 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         for i in range(len(targetWidgets)):
             self.addTargetWidget(targetWidgets[i])
     @addUndo        
-    def createSpaceSwitch(self):
-        # ----------------------------------------------------------------       
+    def createSpaceSwitch(self): 
         data = self.getWidgetData()
+        
+        # ----------------------------------------------------------------     
         if data['source'] is None or data['offsetGroup'] is None:
             return om2.MGlobal.displayWarning('Invalid Parameter')
         
         if True not in data['conType'].values():
             return om2.MGlobal.displayWarning('Invalid Constraint Type')
-            
-        # ----------------------------------------------------------------
+
+
         targetWidgetsData = data['targetWidgets']
         if not targetWidgetsData:
             return om2.MGlobal.displayWarning('Invalid Target')
@@ -671,7 +695,12 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         if None in [widget['spaceTarget'] for widget in targetWidgetsData.values()]:
             return om2.MGlobal.displayWarning('Invalid Space Target')
             
-            
+        '''
+        avoid having identical targets, which could cause us to lose the constraint objects
+        '''    
+        if not self.checkDuplicateUUID(targetWidgetsData):
+            return om2.MGlobal.displayWarning('Duplicate target found')
+        
         # ----------------------------------------------------------------
         itemText = self.targetsBox.currentText() 
         if itemText in MetaUtils.getMetaNodes():
@@ -682,24 +711,23 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
         # ----------------------------------------------------------------
 
-        node = MetaNode(MetaUtils.createMetaNode(self.sourceLineEdit.text()))
-        node.setData(data)
-        self.targetsBox.addItem(node.name)
-        self.targetsBox.setCurrentText(node.name)
+        metaNodeInstance  = MetaNode(MetaUtils.createMetaNode(self.sourceLineEdit.text()))
+        metaNodeInstance.setData(data)
+        self.targetsBox.addItem(metaNodeInstance.name, metaNodeInstance) # add instance to item data
+        self.targetsBox.setCurrentText(metaNodeInstance.name)
     
     @addUndo  
     def deleteSpaceSwitch(self):
-        itemText = self.targetsBox.currentText() 
-        if itemText in MetaUtils.getMetaNodes():
-            MetaNode(itemText).deleteMeta()
-            index = self.targetsBox.findText(itemText)
-            if index != -1: 
-                self.targetsBox.removeItem(index)
 
-        self._setData()
-
-    
+        currentIndex = self.targetsBox.currentIndex()
+        currentItemData = self.targetsBox.itemData(currentIndex)
+        if currentItemData is not None and isinstance(currentItemData, MetaNode):
+            currentItemData.deleteMeta()
+            self.targetsBox.removeItem(currentIndex)
+            #self.resetData()
+            self.updateData() 
+        
+        self.updateData()
         
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
-
