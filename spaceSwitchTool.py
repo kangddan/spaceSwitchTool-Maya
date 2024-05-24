@@ -108,7 +108,7 @@ class MetaNode(object):
 
         for cons in constraints:
             for index, loc in enumerate(self.spaceLocs):
-                condNode = cmds.createNode('condition')
+                condNode = cmds.createNode('condition', name='{}_condition'.format(loc))
                 cmds.setAttr('{}.colorIfTrueR'.format(condNode), 1)
                 cmds.setAttr('{}.colorIfFalseR'.format(condNode), 0)
                 cmds.setAttr('{}.secondTerm'.format(condNode), index)
@@ -130,7 +130,7 @@ class MetaNode(object):
         _targets = [cmds.ls(value['spaceTarget'])[0] for value in targets.values()]
 
         for target in _targets:
-            loc = cmds.createNode('transform', name='{}_spaceSwitch_LOC'.format(target))
+            loc = cmds.createNode('transform', name='{}_{}_spaceSwitch_LOC'.format(self.source[0], target))
             cmds.parent(loc, target)
             cmds.matchTransform(loc, offsetGroup)
             MetaUtils.connectMiAttr(loc, 'message', self.name, 'spaceLocs')
@@ -194,7 +194,13 @@ class MetaNode(object):
 
     
 # -----------------------------------------------------------------------------------     
-        
+
+def uniqueName(name):
+    startNum = 0; newName = name
+    while cmds.objExists(newName):
+        startNum += 1
+        newName = '{}_{:03d}'.format(name, startNum)
+    return newName    
 
 def addUndo(func):
     def undo(*args, **kwargs):
@@ -339,6 +345,8 @@ class TargetWidget(QtWidgets.QWidget):
         self.spaceTargetUUID = data.get('spaceTarget')
         
 
+
+
 class SpaceSwitchUI(QtWidgets.QDialog):
     INSTANCE = None
     
@@ -351,10 +359,9 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def getMeta(self):
         metaNodes = MetaUtils.getMetaNodes()
         self.targetsBox.clear()
-        self.targetsBox.addItems(['New'] + metaNodes)
+        self.targetsBox.addItems(['new'] + metaNodes)
         
-        if self.targetsBox.currentText() in metaNodes:
-            self.setWidgetData(MetaNode(self.targetsBox.currentText()).getData())
+        self._setData()
             
     def closeEvent(self, event):
         super(SpaceSwitchUI, self).closeEvent(event)
@@ -492,13 +499,37 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
         self.sourceBut.clicked.connect(self.addSourceNode)
         self.offsetGroupBut.clicked.connect(self.addOffsetGroupNode)
-        
-        #self.createBut.clicked.connect(self.getWidgetData)
-        #self.deleteBut.clicked.connect(self.setWidgetData)
+
         self.createBut.clicked.connect(self.createSpaceSwitch)
         self.deleteBut.clicked.connect(self.deleteSpaceSwitch)
         
+        '''
+        The activated signal is only emitted when the user manually selects an item
+        it will not be triggered by programmatically selecting an item
+        '''
+        self.targetsBox.activated.connect(self._setData)
         
+    def resetData(self):
+        self.deleteAllTargetWidget()
+        self.sourceLineEdit.setText('')
+        self.offsetGroupLineEdit.setText('')
+        self.positionCheckBox.setChecked(False)
+        self.rotationCheckBox.setChecked(False)
+        self.scaleCheckBox.setChecked(False)
+        self.parentCheckBox.setChecked(False)
+        
+        self.positionCheckBox.setEnabled(True)
+        self.rotationCheckBox.setEnabled(True)
+        self.sourceUUID = None
+        self.offsetGroupUUID = None
+        
+    def _setData(self):
+        itemText = self.targetsBox.currentText()
+        if itemText in MetaUtils.getMetaNodes():
+            self.setWidgetData(MetaNode(itemText).getData())
+        else:
+            self.resetData()
+   
     # --------------------------------------------------------------------------    
     def parentTo(self):
         isParent = self.parentCheckBox.isChecked()
@@ -513,13 +544,13 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             self.rotationCheckBox.setEnabled(False)
             
         else:
-            try:
-                self.positionCheckBox.setChecked(self.pBoxState)
-                self.positionCheckBox.setEnabled(True)
-                self.rotationCheckBox.setChecked(self.rBoxState)
-                self.rotationCheckBox.setEnabled(True)
-            except:
-                pass
+            #try:
+            self.positionCheckBox.setChecked(self.pBoxState)
+            self.positionCheckBox.setEnabled(True)
+            self.rotationCheckBox.setChecked(self.rBoxState)
+            self.rotationCheckBox.setEnabled(True)
+            #except:
+                #pass
         
     def addSourceNode(self):
         sel = cmds.ls(sl=True, long=True)
@@ -592,12 +623,9 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             targetWidgetsData[index] = widget.getWidgetData()
         
         data['targetWidgets'] = targetWidgetsData
-        #print(data)
         return data
         
     def setWidgetData(self, data):
-  
-       # data = {'source': 'B9D205D8-49B8-8006-49B6-C3B95C8E49D4', 'offsetGroup': '13133839-4D11-7378-5EDF-2BBC261030ED', 'conType': {'position': True, 'rotation': False, 'scale': False, 'parent': True}, 'targetWidgets': {0: {'attrName': 'kangddan', 'spaceTarget': 'B9D205D8-49B8-8006-49B6-C3B95C8E49D4'}, 1: {'attrName': 'sb', 'spaceTarget': '13133839-4D11-7378-5EDF-2BBC261030ED'}, 2: {'attrName': 'kdd', 'spaceTarget': '13133839-4D11-7378-5EDF-2BBC261030ED'}}}
 
         self.sourceLineEdit.setText(cmds.ls(data.get('source'))[0])
         self.sourceUUID = data.get('source')
@@ -610,7 +638,12 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.rotationCheckBox.setChecked(data.get('conType')['rotation'])
         self.scaleCheckBox.setChecked(data.get('conType')['scale'])
         self.parentCheckBox.setChecked(data.get('conType')['parent'])
-        self.parentTo() # update checkbox state
+        
+        # --------------------------------------------------
+        # update checkbox state
+        self.pBoxState = data.get('conType')['position']
+        self.rBoxState = data.get('conType')['rotation']
+        self.parentTo()
         
         # ------------------------------------------------------------------------
         self.deleteAllTargetWidget()
@@ -619,6 +652,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             self.addTargetWidget(targetWidgets[i])
     @addUndo        
     def createSpaceSwitch(self):
+        # ----------------------------------------------------------------       
         data = self.getWidgetData()
         if data['source'] is None or data['offsetGroup'] is None:
             return om2.MGlobal.displayWarning('Invalid Parameter')
@@ -637,43 +671,35 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         if None in [widget['spaceTarget'] for widget in targetWidgetsData.values()]:
             return om2.MGlobal.displayWarning('Invalid Space Target')
             
+            
         # ----------------------------------------------------------------
- 
+        itemText = self.targetsBox.currentText() 
+        if itemText in MetaUtils.getMetaNodes():
+            MetaNode(itemText).deleteMeta()
+            index = self.targetsBox.findText(itemText)
+            if index != -1: 
+                self.targetsBox.removeItem(index)
+        
+        # ----------------------------------------------------------------
+
         node = MetaNode(MetaUtils.createMetaNode(self.sourceLineEdit.text()))
         node.setData(data)
-        
+        self.targetsBox.addItem(node.name)
+        self.targetsBox.setCurrentText(node.name)
     
     @addUndo  
     def deleteSpaceSwitch(self):
-        metaNodes = MetaUtils.getMetaNodes()
-        metaNode = MetaNode(metaNodes[0])
-        metaNode.deleteMeta()
-        self.getMeta()
-        #print(metaNode.getData())
-                
-        
-            
-        
-        
-     
+        itemText = self.targetsBox.currentText() 
+        if itemText in MetaUtils.getMetaNodes():
+            MetaNode(itemText).deleteMeta()
+            index = self.targetsBox.findText(itemText)
+            if index != -1: 
+                self.targetsBox.removeItem(index)
 
+        self._setData()
 
-        
+    
         
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
