@@ -34,7 +34,7 @@ class MetaNode(object):
         self._node = om2.MFnDependencyNode(mobj)
         
     @property
-    def name(self):
+    def node(self):
         return self.apiObject.name()
     
     @property
@@ -44,32 +44,32 @@ class MetaNode(object):
     # ----------------------------------------------------------------------------------------------------
     @property
     def source(self):
-        return cmds.listConnections('{}.source'.format(self.name), d=False) or []
+        return cmds.listConnections('{}.source'.format(self.node), d=False) or []
     
     @source.setter
     def source(self, obj):
-        if cmds.isConnected('{}.message'.format(obj), '{}.source'.format(self.name)):
+        if cmds.isConnected('{}.message'.format(obj), '{}.source'.format(self.node)):
             return
-        cmds.connectAttr('{}.message'.format(obj), '{}.source'.format(self.name), f=True)
+        cmds.connectAttr('{}.message'.format(obj), '{}.source'.format(self.node), f=True)
         
     @property
     def offsetGroup(self):
-        return cmds.listConnections('{}.offsetGroup'.format(self.name), d=False) or []
+        return cmds.listConnections('{}.offsetGroup'.format(self.node), d=False) or []
     
     @offsetGroup.setter
     def offsetGroup(self, obj):
-        if cmds.isConnected('{}.message'.format(obj), '{}.offsetGroup'.format(self.name)):
+        if cmds.isConnected('{}.message'.format(obj), '{}.offsetGroup'.format(self.node)):
             return
-        cmds.connectAttr('{}.message'.format(obj), '{}.offsetGroup'.format(self.name), f=True)
+        cmds.connectAttr('{}.message'.format(obj), '{}.offsetGroup'.format(self.node), f=True)
    
     @property
     def target(self):
         targetWidgets = {}
         # get target count
-        spaceTargets = cmds.listConnections('{}.target'.format(self.name), d=False)
+        spaceTargets = cmds.listConnections('{}.target'.format(self.node), d=False)
         for index, target in enumerate(spaceTargets):
             targetData = {}
-            targetData['attrName']    = cmds.getAttr('{}.target[{}].attrName'.format(self.name, index))
+            targetData['attrName']    = cmds.getAttr('{}.target[{}].attrName'.format(self.node, index))
             targetData['spaceTarget'] = cmds.ls(target, uid=True)[0]
             targetWidgets[index] = targetData
             
@@ -79,10 +79,10 @@ class MetaNode(object):
     def target(self, data):
         for index, widget in enumerate(data.values()):
             target = cmds.ls(widget['spaceTarget'])[0]
-            cmds.connectAttr('{}.message'.format(target), '{}.target[{}].spaceTarget'.format(self.name, index), f=True)
+            cmds.connectAttr('{}.message'.format(target), '{}.target[{}].spaceTarget'.format(self.node, index), f=True)
             
             attrName = widget['attrName']
-            cmds.setAttr('{}.target[{}].attrName'.format(self.name, index), attrName, typ="string")
+            cmds.setAttr('{}.target[{}].attrName'.format(self.node, index), attrName, typ="string")
     
     # -----------------------------------------------------------------------------------------------------      
     def createAttr(self, ctrl, targets):
@@ -95,9 +95,9 @@ class MetaNode(object):
     @property
     def toConstraints(self):
         constraints = []
-        childAttrs = cmds.attributeQuery('constraints', node=self.name, listChildren=True)
+        childAttrs = cmds.attributeQuery('constraints', node=self.node, listChildren=True)
         for attr in childAttrs:
-            cons = cmds.listConnections('{}.constraints.{}'.format(self.name, attr), d=False)
+            cons = cmds.listConnections('{}.constraints.{}'.format(self.node, attr), d=False)
             if cons is None:
                 continue
             constraints.append(cons[0])
@@ -115,15 +115,15 @@ class MetaNode(object):
                 cmds.setAttr('{}.secondTerm'.format(condNode), index)
                 cmds.connectAttr('{}.spaceSwitch'.format(ctrl),   '{}.firstTerm'.format(condNode), f=True)
                 cmds.connectAttr('{}.outColorR'.format(condNode), '{}.{}W{}'.format(cons, loc, index), f=True)
-                MetaUtils.connectMiAttr(condNode, 'message', self.name, 'conditionNodes')
+                MetaUtils.connectMiAttr(condNode, 'message', self.node, 'conditionNodes')
                 
     @property
     def conditionNodes(self):
-        return cmds.listConnections('{}.conditionNodes'.format(self.name), d=False) or []
+        return cmds.listConnections('{}.conditionNodes'.format(self.node), d=False) or []
         
     @property        
     def spaceLocs(self):
-        return cmds.listConnections('{}.spaceLocs'.format(self.name), d=False) or []
+        return cmds.listConnections('{}.spaceLocs'.format(self.node), d=False) or []
         
     @spaceLocs.setter
     def spaceLocs(self, data):
@@ -134,7 +134,7 @@ class MetaNode(object):
             loc = cmds.createNode('transform', name='{}_{}_spaceSwitch_LOC'.format(self.source[0], target))
             cmds.parent(loc, target)
             cmds.matchTransform(loc, offsetGroup)
-            MetaUtils.connectMiAttr(loc, 'message', self.name, 'spaceLocs')
+            MetaUtils.connectMiAttr(loc, 'message', self.node, 'spaceLocs')
         
       
     def createConstrain(self, types, offsetGroup=None):
@@ -144,25 +144,27 @@ class MetaNode(object):
         for conType in conTypes:
             if conType == 'position':
                 c = cmds.pointConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.positionConstraint'.format(self.name), f=True)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.positionConstraint'.format(self.node), f=True)
             elif conType == 'rotation':
                 c = cmds.orientConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.rotationConstraint'.format(self.name), f=True)
+                cmds.setAttr('{}.interpType'.format(c), 2)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.rotationConstraint'.format(self.node), f=True)
             elif conType == 'scale':
                 c = cmds.scaleConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.scaleConstraint'.format(self.name), f=True)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.scaleConstraint'.format(self.node), f=True)
             elif conType == 'parent':
                 c = cmds.parentConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.parentConstraint'.format(self.name), f=True)
+                cmds.setAttr('{}.interpType'.format(c), 2)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.parentConstraint'.format(self.node), f=True)
                 
     # -----------------------------------------------------------------------------------------------------  
     
     def getConType(self):
         conTypeDic = {}
         # get childs attr name
-        childAttrs = cmds.attributeQuery('constraints', node=self.name, listChildren=True)
+        childAttrs = cmds.attributeQuery('constraints', node=self.node, listChildren=True)
         for attr in childAttrs:
-            value = bool(cmds.listConnections('{}.constraints.{}'.format(self.name, attr)))
+            value = bool(cmds.listConnections('{}.constraints.{}'.format(self.node, attr)))
             conTypeDic[attr.split('Constraint')[0]] = value
         return conTypeDic
  
@@ -172,10 +174,12 @@ class MetaNode(object):
         self.offsetGroup = cmds.ls(data['offsetGroup'])[0]
         self.target = data['targetWidgets']
         self.spaceLocs = (self.offsetGroup[0], self.target)
+        self.offsetGroupMatrix = cmds.xform(self.offsetGroup[0], q=True, m=True, ws=False)
         
         self.createConstrain(data['conType'], self.offsetGroup[0])
         self.createAttr(self.source[0], self.target)
         self.createSwitchNode(self.source[0])
+        
         
     def getData(self):
         metaData = {}
@@ -191,8 +195,17 @@ class MetaNode(object):
                     self.spaceLocs)
         if cmds.attributeQuery('spaceSwitch', node=self.source[0], ex=True):
             cmds.deleteAttr('{}.spaceSwitch'.format(self.source[0]))
-        cmds.delete(self.name)
-
+        cmds.xform(self.offsetGroup[0], m=self.offsetGroupMatrix, ws=False)
+        cmds.delete(self.node)
+    
+    @property    
+    def offsetGroupMatrix(self):
+        return cmds.getAttr('{}.offsetGroupLocalMatrix'.format(self.node))
+    
+    
+    @offsetGroupMatrix.setter
+    def offsetGroupMatrix(self, inMatrix):
+        cmds.setAttr('{}.offsetGroupLocalMatrix'.format(self.node), inMatrix, typ='matrix')
     
 # -----------------------------------------------------------------------------------     
 
@@ -262,6 +275,7 @@ class MetaUtils(object):
         # ----------------------------------------------------
         cmds.addAttr(metaNode, ln='spaceLocs', dt='string', m=True)
         cmds.addAttr(metaNode, ln='conditionNodes', dt='string', m=True)
+        cmds.addAttr(metaNode, ln='offsetGroupLocalMatrix', dt="matrix")
         return metaNode
         
     @classmethod
@@ -683,10 +697,16 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         targetWidgets = data.get('targetWidgets', [])
         for i in range(len(targetWidgets)):
             self.addTargetWidget(targetWidgets[i])
+            
+    # --------------------------------------------------------------------------------
+
+            
+    # --------------------------------------------------------------------------------
+            
     @addUndo        
     def createSpaceSwitch(self): 
         data = self.getWidgetData()
-        
+
         # ----------------------------------------------------------------     
         if data['source'] is None or data['offsetGroup'] is None:
             return om2.MGlobal.displayWarning('Invalid Parameter')
@@ -723,8 +743,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
 
         metaNodeInstance  = MetaNode(MetaUtils.createMetaNode(self.sourceLineEdit.text()))
         metaNodeInstance.setData(data)
-        self.targetsBox.addItem(metaNodeInstance.name, metaNodeInstance) # add instance to item data
-        self.targetsBox.setCurrentText(metaNodeInstance.name)
+        self.targetsBox.addItem(metaNodeInstance.node, metaNodeInstance) # add instance to item data
+        self.targetsBox.setCurrentText(metaNodeInstance.node)
     
     @addUndo  
     def deleteSpaceSwitch(self):
