@@ -6,7 +6,6 @@ import PySide2.QtGui     as QtGui
 
 # -----------------------------------------------------------------------------------    
 
-
 class MetaNode(object):
     INSTANCE_CACHE = {}
     def __new__(cls, *args, **kwargs):
@@ -282,7 +281,7 @@ class LineShape(QtWidgets.QFrame):
         self.setStyleSheet("border-top: 2px solid #505050;")
         
 class TargetWidget(QtWidgets.QWidget):
-    
+
     def __init__(self, parent=None):
         super(TargetWidget, self).__init__(parent)
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True) 
@@ -323,7 +322,8 @@ class TargetWidget(QtWidgets.QWidget):
         self.attrNameLine = QtWidgets.QLineEdit()
         self.spaceTargetLine  = QtWidgets.QLineEdit()
         self.spaceTargetLine.setReadOnly(True)
-        self.spaceBut = QtWidgets.QPushButton('<')
+        self.spaceBut = QtWidgets.QPushButton()
+        self.spaceBut.setIcon(QtGui.QIcon(':moveUVLeft.png'))
         self.spaceBut.setFixedSize(28, 28)
 
     def createConnections(self):
@@ -346,8 +346,6 @@ class TargetWidget(QtWidgets.QWidget):
         self.spaceTargetLine.setText(cmds.ls(data.get('spaceTarget'))[0])
         self.spaceTargetUUID = data.get('spaceTarget')
         
-
-
 
 class SpaceSwitchUI(QtWidgets.QDialog):
     INSTANCE = None
@@ -427,8 +425,6 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.sourceUUID = None
         self.offsetGroupUUID = None
         self.getMeta()
-
-
         
     def createLayouts(self):
         mainLayout = QtWidgets.QVBoxLayout(self)
@@ -437,8 +433,9 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
         targetsLayout = QtWidgets.QHBoxLayout()
         targetsLayout.setSpacing(5)
-        targetsLayout.addWidget(QtWidgets.QLabel('Space Switch'))
+        targetsLayout.addWidget(QtWidgets.QLabel('Meta  Nodes'))
         targetsLayout.addWidget(self.targetsBox)
+        targetsLayout.addWidget(self.updateBut)
         targetsLayout.setStretchFactor(self.targetsBox, 1)
         
         gridLayout = QtWidgets.QGridLayout()
@@ -496,15 +493,20 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def createWidgets(self):
 
         self.targetsBox = QtWidgets.QComboBox()
-        
+        self.updateBut  = QtWidgets.QPushButton()
+        self.updateBut.setFixedSize(26, 26)
+        self.updateBut.setIcon(QtGui.QIcon(':refresh.png'))
         # ----------------------------------------
         self.sourceLineEdit = QtWidgets.QLineEdit()
         self.sourceLineEdit.setReadOnly(True)
-        self.sourceBut = QtWidgets.QPushButton('<')
+        self.sourceBut = QtWidgets.QPushButton()
+        self.sourceBut.setIcon(QtGui.QIcon(':moveUVLeft.png'))
+        
         self.sourceBut.setFixedSize(28, 28)
         self.offsetGroupLineEdit = QtWidgets.QLineEdit()
         self.offsetGroupLineEdit.setReadOnly(True)
-        self.offsetGroupBut = QtWidgets.QPushButton('<')
+        self.offsetGroupBut = QtWidgets.QPushButton()
+        self.offsetGroupBut.setIcon(QtGui.QIcon(':moveUVLeft.png'))
         self.offsetGroupBut.setFixedSize(28, 28)
         
         # ----------------------------------------
@@ -541,6 +543,14 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         it will not be triggered by programmatically selecting an item
         '''
         self.targetsBox.activated.connect(self.updateData)
+        
+        # update ui
+        #self.shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Z"), self)
+        #self.shortcut.activated.connect(self._updateUI_)
+        self.updateBut.clicked.connect(self._updateUI_)
+        
+    def _updateUI_(self):
+        self.getMeta()
   
     # --------------------------------------------------------------------------    
 
@@ -548,7 +558,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def parentTo(self):
         isParent = self.parentCheckBox.isChecked()
         if isParent:
-            # get checkbox state
+            # get conscheckbox state
             self.pBoxState = self.positionCheckBox.isChecked()
             self.rBoxState = self.rotationCheckBox.isChecked()
             
