@@ -280,7 +280,7 @@ class MetaUtils(object):
         return metaNode
         
     @classmethod
-    def isUuidValid(cls, uuid: str | om2.MUuid) -> bool:
+    def isUuidValid(cls, uuid):
         if isinstance(uuid, str):
             return om2.MUuid(uuid).valid()
         elif isinstance(uuid, om2.MUuid):
@@ -330,7 +330,7 @@ class TargetWidget(QtWidgets.QWidget):
         gridLayout.addWidget(self.spaceBut, 1, 2)
         
         mainLayout.addLayout(gridLayout)
-        #mainLayout.addWidget(LineShape())
+        mainLayout.addWidget(LineShape())
         #mainLayout.addStretch()
         
     def createWidgets(self):
@@ -572,11 +572,19 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.updateBut.clicked.connect(self._updateUI_)
         
     def _updateUI_(self):
+        itemText = self.targetsBox.currentText() 
         self.getMeta()
-  
+        
+        # select item
+        if itemText in [self.targetsBox.itemText(i) for i in range(self.targetsBox.count())]:
+            index = self.targetsBox.findText(itemText)
+            self.targetsBox.setCurrentIndex(index)
+            
+            itemData = self.targetsBox.itemData(index)
+            if itemData is not None and isinstance(itemData, MetaNode):
+                self.setWidgetData(itemData.getData()) # get metaNode instance data
     # --------------------------------------------------------------------------    
 
-    
     def parentTo(self):
         isParent = self.parentCheckBox.isChecked()
         if isParent:
@@ -654,15 +662,6 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         return targetWidgets
         
     # ---------------------------------------------------------------
-    
-    def checkDuplicateUUID(self, data):
-        uuids = set()
-        for item in data.values():
-            uuid = item['spaceTarget']
-            if uuid in uuids:
-                return False
-            uuids.add(uuid)
-        return True
 
     def getWidgetData(self):
         data = {}
@@ -722,6 +721,16 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             itemData.deleteMeta()
             self.targetsBox.removeItem(currentIndex)
             
+    # -----------------------------------------------------------------------------       
+    def checkDuplicateValue(self, data, key):
+        values = set()
+        for item in data.values():
+            value = item[key]
+            if value in values:
+                return False
+            values.add(value)
+        return True
+            
     def checkData(self, data):
 
         # ----------------------------------------------------------------     
@@ -743,17 +752,23 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         if False in [bool(widget['attrName']) for widget in targetWidgetsData.values()]:
             return om2.MGlobal.displayWarning('Invalid attribute name')
             
+ 
         if None in [widget['spaceTarget'] for widget in targetWidgetsData.values()]:
             return om2.MGlobal.displayWarning('Invalid target object')
             
         '''
-        avoid having identical targets, which could cause us to lose the constraint objects
+        avoid having identical targets/attrName, which could cause us to lose the constraint objects
         '''    
-        if not self.checkDuplicateUUID(targetWidgetsData):
+        
+        if not self.checkDuplicateValue(targetWidgetsData, 'attrName'):
+            return om2.MGlobal.displayWarning('Having the same attribute name')    
+            
+        if not self.checkDuplicateValue(targetWidgetsData, 'spaceTarget'):
             return om2.MGlobal.displayWarning('Having the same target object')
             
         return True
         
+    # -----------------------------------------------------------------------------       
     @addUndo        
     def createSpaceSwitch(self): 
         data = self.getWidgetData()
