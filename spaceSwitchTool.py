@@ -179,6 +179,7 @@ class MetaNode(object):
         self.createConstrain(data['conType'], self.offsetGroup[0])
         self.createAttr(self.source[0], self.target)
         self.createSwitchNode(self.source[0])
+        cmds.select(self.source[0], ne=True)
         
         
     def getData(self):
@@ -334,6 +335,11 @@ class TargetWidget(QtWidgets.QWidget):
         
     def createWidgets(self):
         self.attrNameLine = QtWidgets.QLineEdit()
+        regex = QtCore.QRegExp('^[a-zA-Z_][a-zA-Z0-9_]*$')
+        validator = QtGui.QRegExpValidator(regex, self.attrNameLine)
+        self.attrNameLine.setValidator(validator)
+        
+        # ---------------------------------------
         self.spaceTargetLine  = QtWidgets.QLineEdit()
         self.spaceTargetLine.setReadOnly(True)
         self.spaceBut = QtWidgets.QPushButton()
@@ -346,7 +352,7 @@ class TargetWidget(QtWidgets.QWidget):
     def addSpaceTargetNode(self):
         sel = cmds.ls(sl=True, long=True)
         if not sel:
-            return om2.MGlobal.displayWarning('Please select a object')
+            return om2.MGlobal.displayWarning('Please select an object')
         
         self.spaceTargetLine.setText(sel[0].split('|')[-1])
         self.spaceTargetUUID = cmds.ls(sel[0], uid=True)[0]
@@ -398,11 +404,13 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
     def updateData(self):
         currentIndex = self.targetsBox.currentIndex()
-        currentItemData = self.targetsBox.itemData(currentIndex)
-        if currentItemData is not None and isinstance(currentItemData, MetaNode):
-            self.setWidgetData(currentItemData.getData()) # get metaNode instance data
+        itemData = self.targetsBox.itemData(currentIndex)
+        if itemData is not None and isinstance(itemData, MetaNode):
+            self.setWidgetData(itemData.getData()) # get metaNode instance data
+            cmds.select(itemData.source[0], ne=True)
         else:   
             self.resetData()
+            #cmds.select(cl=True)
     
     # --------------------------------------------------------
             
@@ -593,7 +601,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def addSourceNode(self):
         sel = cmds.ls(sl=True, long=True)
         if not sel:
-            return om2.MGlobal.displayWarning('Please select a object')
+            return om2.MGlobal.displayWarning('Please select an object')
         
         self.sourceLineEdit.setText(sel[0].split('|')[-1])
         self.sourceUUID = cmds.ls(sel[0], uid=True)[0]
@@ -609,7 +617,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def addOffsetGroupNode(self):
         sel = cmds.ls(sl=True, long=True)
         if not sel:
-            return om2.MGlobal.displayWarning('Please select a object')
+            return om2.MGlobal.displayWarning('Please select an object')
         
         self.offsetGroupLineEdit.setText(sel[0].split('|')[-1])
         self.offsetGroupUUID = cmds.ls(sel[0], uid=True)[0]
@@ -645,6 +653,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
  
         return targetWidgets
         
+    # ---------------------------------------------------------------
+    
     def checkDuplicateUUID(self, data):
         uuids = set()
         for item in data.values():
@@ -653,8 +663,6 @@ class SpaceSwitchUI(QtWidgets.QDialog):
                 return False
             uuids.add(uuid)
         return True
-        
-    # ---------------------------------------------------------------
 
     def getWidgetData(self):
         data = {}
@@ -699,65 +707,76 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             self.addTargetWidget(targetWidgets[i])
             
     # --------------------------------------------------------------------------------
-
-            
-    # --------------------------------------------------------------------------------
-            
-    @addUndo        
-    def createSpaceSwitch(self): 
-        data = self.getWidgetData()
-
-        # ----------------------------------------------------------------     
-        if data['source'] is None or data['offsetGroup'] is None:
-            return om2.MGlobal.displayWarning('Invalid Parameter')
-        
-        if True not in data['conType'].values():
-            return om2.MGlobal.displayWarning('Invalid Constraint Type')
-
-
-        targetWidgetsData = data['targetWidgets']
-        if not targetWidgetsData:
-            return om2.MGlobal.displayWarning('Invalid Target')
-        
-        if False in [bool(widget['attrName']) for widget in targetWidgetsData.values()]:
-            return om2.MGlobal.displayWarning('Invalid Name')
-            
-        if None in [widget['spaceTarget'] for widget in targetWidgetsData.values()]:
-            return om2.MGlobal.displayWarning('Invalid Space Target')
-            
+    def deleteTargetItemAndMeta(self):
         '''
-        avoid having identical targets, which could cause us to lose the constraint objects
-        '''    
-        if not self.checkDuplicateUUID(targetWidgetsData):
-            return om2.MGlobal.displayWarning('Duplicate target found')
-        
-        # ----------------------------------------------------------------
         itemText = self.targetsBox.currentText() 
         if itemText in MetaUtils.getMetaNodes():
             MetaNode(itemText).deleteMeta()
             index = self.targetsBox.findText(itemText)
             if index != -1: 
                 self.targetsBox.removeItem(index)
+        ''' 
+        currentIndex = self.targetsBox.currentIndex()      
+        itemData = self.targetsBox.itemData(currentIndex)
+        if itemData is not None and isinstance(itemData, MetaNode):
+            itemData.deleteMeta()
+            self.targetsBox.removeItem(currentIndex)
+            
+    def checkData(self, data):
+
+        # ----------------------------------------------------------------     
+        if data['source'] is None or data['offsetGroup'] is None:
+            return om2.MGlobal.displayWarning('Invalid parameter')
+            
+        if data['source'] == data['offsetGroup']:
+            return om2.MGlobal.displayWarning('Invalid parameter')
+        
+        
+        if True not in data['conType'].values():
+            return om2.MGlobal.displayWarning('Invalid constraint type')
+
+
+        targetWidgetsData = data['targetWidgets']
+        if not targetWidgetsData:
+            return om2.MGlobal.displayWarning('Please add at least one space switch')
+        
+        if False in [bool(widget['attrName']) for widget in targetWidgetsData.values()]:
+            return om2.MGlobal.displayWarning('Invalid attribute name')
+            
+        if None in [widget['spaceTarget'] for widget in targetWidgetsData.values()]:
+            return om2.MGlobal.displayWarning('Invalid target object')
+            
+        '''
+        avoid having identical targets, which could cause us to lose the constraint objects
+        '''    
+        if not self.checkDuplicateUUID(targetWidgetsData):
+            return om2.MGlobal.displayWarning('Having the same target object')
+            
+        return True
+        
+    @addUndo        
+    def createSpaceSwitch(self): 
+        data = self.getWidgetData()
+        if not self.checkData(data):
+            return
+        
+        # ---------------------------------------------------------------- 
+        self.deleteTargetItemAndMeta()
         
         # ----------------------------------------------------------------
-
-        metaNodeInstance  = MetaNode(MetaUtils.createMetaNode(self.sourceLineEdit.text()))
+        # uuid to string
+        sourceFullPathName = cmds.ls(data['source'])[0]
+        metaNodeInstance  = MetaNode(MetaUtils.createMetaNode(sourceFullPathName))
         metaNodeInstance.setData(data)
         self.targetsBox.addItem(metaNodeInstance.node, metaNodeInstance) # add instance to item data
         self.targetsBox.setCurrentText(metaNodeInstance.node)
-    
+      
     @addUndo  
     def deleteSpaceSwitch(self):
-
-        currentIndex = self.targetsBox.currentIndex()
-        currentItemData = self.targetsBox.itemData(currentIndex)
-        if currentItemData is not None and isinstance(currentItemData, MetaNode):
-            currentItemData.deleteMeta()
-            self.targetsBox.removeItem(currentIndex)
-            #self.resetData()
-            self.updateData() 
         
+        self.deleteTargetItemAndMeta()
         self.updateData()
         
+    
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
