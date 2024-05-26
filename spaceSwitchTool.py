@@ -4,219 +4,6 @@ import PySide2.QtWidgets as QtWidgets
 import PySide2.QtCore    as QtCore
 import PySide2.QtGui     as QtGui
 
-# -----------------------------------------------------------------------------------    
-
-class MetaNode(object):
-    INSTANCE_CACHE = {}
-    def __new__(cls, *args, **kwargs):
-        nodeName = args[0] if len(args) > 0 else kwargs.get('nodeName')
-        
-        uuid = cmds.ls(nodeName, uid=True)[0]
-        if uuid in cls.INSTANCE_CACHE:
-            return cls.INSTANCE_CACHE[uuid]
-            
-        instance = super(MetaNode, cls).__new__(cls)
-        cls.INSTANCE_CACHE[uuid] = instance
-        return instance
-    
-    def __init__(self, nodeName):
-        if not hasattr(self, '_INITOK'):
-            self.apiObject = nodeName
-            self._INITOK = True
-
-    @property
-    def apiObject(self):
-        return self._node
-    
-    @apiObject.setter
-    def apiObject(self, nodeName):
-        mobj = om2.MGlobal.getSelectionListByName(nodeName).getDependNode(0)
-        self._node = om2.MFnDependencyNode(mobj)
-        
-    @property
-    def node(self):
-        return self.apiObject.name()
-    
-    @property
-    def uuid(self):
-        return self.apiObject.uuid().asString()
-       
-    # ----------------------------------------------------------------------------------------------------
-    @property
-    def source(self):
-        return cmds.listConnections('{}.source'.format(self.node), d=False) or []
-    
-    @source.setter
-    def source(self, obj):
-        if cmds.isConnected('{}.message'.format(obj), '{}.source'.format(self.node)):
-            return
-        cmds.connectAttr('{}.message'.format(obj), '{}.source'.format(self.node), f=True)
-        
-    @property
-    def offsetGroup(self):
-        return cmds.listConnections('{}.offsetGroup'.format(self.node), d=False) or []
-    
-    @offsetGroup.setter
-    def offsetGroup(self, obj):
-        if cmds.isConnected('{}.message'.format(obj), '{}.offsetGroup'.format(self.node)):
-            return
-        cmds.connectAttr('{}.message'.format(obj), '{}.offsetGroup'.format(self.node), f=True)
-   
-    @property
-    def target(self):
-        targetWidgets = {}
-        # get target count
-        spaceTargets = cmds.listConnections('{}.target'.format(self.node), d=False)
-        for index, target in enumerate(spaceTargets):
-            targetData = {}
-            targetData['attrName']    = cmds.getAttr('{}.target[{}].attrName'.format(self.node, index))
-            targetData['spaceTarget'] = cmds.ls(target, uid=True)[0]
-            targetWidgets[index] = targetData
-            
-        return targetWidgets
-        
-    @target.setter
-    def target(self, data):
-        for index, widget in enumerate(data.values()):
-            target = cmds.ls(widget['spaceTarget'])[0]
-            cmds.connectAttr('{}.message'.format(target), '{}.target[{}].spaceTarget'.format(self.node, index), f=True)
-            
-            attrName = widget['attrName']
-            cmds.setAttr('{}.target[{}].attrName'.format(self.node, index), attrName, typ="string")
-    
-    # -----------------------------------------------------------------------------------------------------      
-    def createAttr(self, ctrl, targets):
-        attrNames = [value['attrName'] for value in targets.values()]
-        if cmds.attributeQuery('spaceSwitch', node=ctrl, ex=True):
-            cmds.deleteAttr('{}.spaceSwitch'.format(ctrl))
-            
-        cmds.addAttr(ctrl, ln='spaceSwitch', at='enum', k=True, en=':'.join(attrNames))
-    # -----------------------------------------------------------------------------------------------------  
-    @property
-    def toConstraints(self):
-        constraints = []
-        childAttrs = cmds.attributeQuery('constraints', node=self.node, listChildren=True)
-        for attr in childAttrs:
-            cons = cmds.listConnections('{}.constraints.{}'.format(self.node, attr), d=False)
-            if cons is None:
-                continue
-            constraints.append(cons[0])
-        return constraints
-
-    def createSwitchNode(self, ctrl):
-        # get constraints
-        constraints = self.toConstraints
-
-        for cons in constraints:
-            for index, loc in enumerate(self.spaceLocs):
-                condNode = cmds.createNode('condition', name='{}_condition'.format(loc))
-                cmds.setAttr('{}.colorIfTrueR'.format(condNode), 1)
-                cmds.setAttr('{}.colorIfFalseR'.format(condNode), 0)
-                cmds.setAttr('{}.secondTerm'.format(condNode), index)
-                cmds.connectAttr('{}.spaceSwitch'.format(ctrl),   '{}.firstTerm'.format(condNode), f=True)
-                cmds.connectAttr('{}.outColorR'.format(condNode), '{}.{}W{}'.format(cons, loc, index), f=True)
-                MetaUtils.connectMiAttr(condNode, 'message', self.node, 'conditionNodes')
-                
-    @property
-    def conditionNodes(self):
-        return cmds.listConnections('{}.conditionNodes'.format(self.node), d=False) or []
-        
-    @property        
-    def spaceLocs(self):
-        return cmds.listConnections('{}.spaceLocs'.format(self.node), d=False) or []
-        
-    @spaceLocs.setter
-    def spaceLocs(self, data):
-        offsetGroup, targets = data
-        _targets = [cmds.ls(value['spaceTarget'])[0] for value in targets.values()]
-
-        for target in _targets:
-            loc = cmds.createNode('transform', name='{}_{}_spaceSwitch_LOC'.format(self.source[0], target))
-            cmds.parent(loc, target)
-            cmds.matchTransform(loc, offsetGroup)
-            MetaUtils.connectMiAttr(loc, 'message', self.node, 'spaceLocs')
-        
-      
-    def createConstrain(self, types, offsetGroup=None):
-        spaceLoc = self.spaceLocs
-        conTypes = [i for i in types if types[i]]
-        
-        for conType in conTypes:
-            if conType == 'position':
-                c = cmds.pointConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.positionConstraint'.format(self.node), f=True)
-            elif conType == 'rotation':
-                c = cmds.orientConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.setAttr('{}.interpType'.format(c), 2)
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.rotationConstraint'.format(self.node), f=True)
-            elif conType == 'scale':
-                c = cmds.scaleConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.scaleConstraint'.format(self.node), f=True)
-            elif conType == 'parent':
-                c = cmds.parentConstraint(spaceLoc, offsetGroup, mo=True)[0]
-                cmds.setAttr('{}.interpType'.format(c), 2)
-                cmds.connectAttr('{}.message'.format(c), '{}.constraints.parentConstraint'.format(self.node), f=True)
-                
-    # -----------------------------------------------------------------------------------------------------  
-    
-    def getConType(self):
-        conTypeDic = {}
-        # get childs attr name
-        childAttrs = cmds.attributeQuery('constraints', node=self.node, listChildren=True)
-        for attr in childAttrs:
-            value = bool(cmds.listConnections('{}.constraints.{}'.format(self.node, attr)))
-            conTypeDic[attr.split('Constraint')[0]] = value
-        return conTypeDic
- 
-    # --------------------------------------------------------------------------------------------------
-    def setData(self, data):
-        self.source = cmds.ls(data['source'])[0]
-        self.offsetGroup = cmds.ls(data['offsetGroup'])[0]
-        self.target = data['targetWidgets']
-        self.spaceLocs = (self.offsetGroup[0], self.target)
-        self.offsetGroupMatrix = cmds.xform(self.offsetGroup[0], q=True, m=True, ws=False)
-        
-        self.createConstrain(data['conType'], self.offsetGroup[0])
-        self.createAttr(self.source[0], self.target)
-        self.createSwitchNode(self.source[0])
-        cmds.select(self.source[0], ne=True)
-        
-        
-    def getData(self):
-        metaData = {}
-        metaData['source']        = cmds.ls(self.source[0], uid=True)[0]
-        metaData['offsetGroup']   = cmds.ls(self.offsetGroup[0], uid=True)[0]
-        metaData['conType']       = self.getConType()
-        metaData['targetWidgets'] = self.target
-        return metaData
-        
-    def deleteMeta(self):
-        cmds.delete(self.conditionNodes, 
-                    self.toConstraints,
-                    self.spaceLocs)
-        if cmds.attributeQuery('spaceSwitch', node=self.source[0], ex=True):
-            cmds.deleteAttr('{}.spaceSwitch'.format(self.source[0]))
-        cmds.xform(self.offsetGroup[0], m=self.offsetGroupMatrix, ws=False)
-        cmds.delete(self.node)
-    
-    @property    
-    def offsetGroupMatrix(self):
-        return cmds.getAttr('{}.offsetGroupLocalMatrix'.format(self.node))
-    
-    
-    @offsetGroupMatrix.setter
-    def offsetGroupMatrix(self, inMatrix):
-        cmds.setAttr('{}.offsetGroupLocalMatrix'.format(self.node), inMatrix, typ='matrix')
-    
-# -----------------------------------------------------------------------------------     
-
-def uniqueName(name):
-    startNum = 0; newName = name
-    while cmds.objExists(newName):
-        startNum += 1
-        newName = '{}_{:03d}'.format(name, startNum)
-    return newName    
-
 def addUndo(func):
     def undo(*args, **kwargs):
         cmds.undoInfo(openChunk=True)
@@ -233,41 +20,30 @@ def mayaMainWindow():
     else:
         return wrapInstance(long(MQtUtil.mainWindow()), QtWidgets.QMainWindow)
         
+def getSelection():
+    sel = om2.MGlobal.getActiveSelectionList()
+    return [sel.getDagPath(i) 
+            if sel.getDependNode(i).hasFn(om2.MFn.kDagNode) 
+            else om2.MFnDependencyNode(sel.getDependNode(i)) 
+            for i in range(sel.length())]
+
         
 class MetaUtils(object):
-    _NODETYPE_   = 'network'
-    _META_VALUE_ = 'spaceSwitch'
     
-    @classmethod
-    def getMetaNodes(cls):
-        return [node for node in cmds.ls(typ=cls._NODETYPE_)
-                if cmds.attributeQuery('metaType', n=node, ex=True) and 
-                cmds.getAttr('{}.metaType'.format(node)) == cls._META_VALUE_]
-    
-    @classmethod
-    def connectMiAttr(cls, node, attr, metaNode, metaAttr):
-        index = 0  
-        while True:
-            fullPathAttr = '{}.{}[{}]'.format(metaNode, metaAttr, index)
-            if cmds.listConnections(fullPathAttr, d=False) is None:
-                cmds.connectAttr('{}.{}'.format(node, attr), fullPathAttr, f=True)
-                break   
-            index += 1 
-        
-    @classmethod
-    def createMetaNode(cls, ctrlName):
-        metaNode = cmds.createNode(cls._NODETYPE_, name='{0}_spaceSwitch_meta'.format(ctrlName))
+    @staticmethod
+    def createMetaNode(nodeName, nodeType):
+        metaNode = cmds.createNode(nodeType, name=nodeName.format(nodeName))
         # ----------------------------------------------------
-        cmds.addAttr(metaNode, ln='metaType', dt='string')
-        cmds.setAttr('{}.metaType'.format(metaNode), cls._META_VALUE_, typ='string')
-        cmds.setAttr('{}.metaType'.format(metaNode), lock=True)
+        cmds.addAttr(metaNode, ln='metaClass', dt='string')
+        cmds.setAttr('{}.metaClass'.format(metaNode), 'SpaceSwitch', typ='string')
+        cmds.setAttr('{}.metaClass'.format(metaNode), lock=True)
         cmds.addAttr(metaNode, ln='source', at='message')
         cmds.addAttr(metaNode, ln='offsetGroup', at='message')
         cmds.addAttr(metaNode, ln='constraints', nc=4, at='compound')
-        cmds.addAttr(metaNode, ln='positionConstraint', at='message', p='constraints')
-        cmds.addAttr(metaNode, ln='rotationConstraint', at='message', p='constraints')
-        cmds.addAttr(metaNode, ln='scaleConstraint',    at='message', p='constraints')
-        cmds.addAttr(metaNode, ln='parentConstraint',   at='message', p='constraints')
+        cmds.addAttr(metaNode, ln='pointConstraint', at='message', p='constraints')
+        cmds.addAttr(metaNode, ln='orientConstraint',at='message', p='constraints')
+        cmds.addAttr(metaNode, ln='scaleConstraint', at='message', p='constraints')
+        cmds.addAttr(metaNode, ln='parentConstraint',at='message', p='constraints')
         
         # ----------------------------------------------------
         cmds.addAttr(metaNode, ln='target', nc=2, at='compound', m=True)
@@ -278,17 +54,271 @@ class MetaUtils(object):
         cmds.addAttr(metaNode, ln='conditionNodes', dt='string', m=True)
         cmds.addAttr(metaNode, ln='offsetGroupLocalMatrix', dt="matrix")
         return metaNode
-        
-    @classmethod
-    def isUuidValid(cls, uuid):
+    
+    @staticmethod
+    def connectMiAttr(node, attr, metaNode, metaAttr):
+        index = 0  
+        while True:
+            fullPathAttr = '{}.{}[{}]'.format(metaNode, metaAttr, index)
+            if cmds.listConnections(fullPathAttr, d=False) is None:
+                cmds.connectAttr('{}.{}'.format(node, attr), fullPathAttr, f=True)
+                break   
+            index += 1 
+    
+    @staticmethod
+    def isUuidValid(uuid):
         if isinstance(uuid, str):
             return om2.MUuid(uuid).valid()
         elif isinstance(uuid, om2.MUuid):
             return uuid.valid()
         return False
+        
+    @staticmethod
+    def getMetaNodes():
+        return [SpaceSwitchMeta(node) for node in cmds.ls(typ='network')
+                if cmds.attributeQuery('metaClass', n=node, ex=True) and 
+                cmds.getAttr('{}.metaClass'.format(node)) == 'SpaceSwitch']
+                
+    @staticmethod            
+    def uniqueName(name):
+        startNum = 0; newName = name
+        while cmds.objExists(newName):
+            startNum += 1
+            newName = '{}_{:03d}'.format(name, startNum)
+        return newName
+        
+    @staticmethod     
+    def getUuid(nodeName):
+        try:
+            mobj = om2.MGlobal.getSelectionListByName(nodeName).getDependNode(0)
+            return om2.MFnDependencyNode(mobj).uuid().asString()
+        except:
+            return  
+     
+class SpaceSwitchMeta(object):
+    _CACHE = {}
+    _NODETYPE = 'network'
+    
+    def __new__(cls, *args, **kwargs):
+        nodeName = args[0] if len(args) > 0 else kwargs.get('nodeName')
+        
+        uuid = MetaUtils.getUuid(nodeName)
+        if uuid is None:
+            uuid = MetaUtils.getUuid(cls._create(nodeName, cls._NODETYPE))
             
+        if uuid in cls._CACHE:
+            return cls._CACHE[uuid]
+            
+        instance = super(SpaceSwitchMeta, cls).__new__(cls)
+        cls._CACHE[uuid] = instance
+        return instance
+        
+    def __init__(self, nodeName):
+        if not hasattr(self, '_INITOK'):
+            self.node    = nodeName
+            self._INITOK = True
+            
+    def __str__(self):
+        return self.path
+        
+    def __repr__(self):
+        return "<SpaceSwitchMeta |'{}'>".format(self.node.name())
+        
+    @classmethod
+    def _create(cls, nodeName, nodeType):
+        return MetaUtils.createMetaNode(nodeName, nodeType)
+            
+    @property
+    def node(self):
+        return self._node
+    
+    @node.setter
+    def node(self, nodeName):
+        mobj       = om2.MGlobal.getSelectionListByName(nodeName).getDependNode(0)
+        self._node = om2.MFnDependencyNode(mobj)
+        
+    @property
+    def path(self):
+        return self.node.name()
+        
+    # -----------------------------------------------------------------------------------------    
+    @property
+    def source(self):
+        source = cmds.listConnections('{}.source'.format(self), d=False)
+        return source[0] if source else None
+    
+    @source.setter
+    def source(self, obj):
+        cmds.connectAttr('{}.message'.format(obj), '{}.source'.format(self), f=True)
+        
+    @property
+    def offsetGroup(self):
+        offsetGroup = cmds.listConnections('{}.offsetGroup'.format(self), d=False)
+        return offsetGroup[0] if offsetGroup else None
+    
+    @offsetGroup.setter
+    def offsetGroup(self, obj):
+        cmds.connectAttr('{}.message'.format(obj), '{}.offsetGroup'.format(self), f=True)
+    
+    # -----------------------------------------------------------------------------------------
+    @property
+    def target(self):
+        targetWidgets = {}
+        # get target count
+        spaceTargets = cmds.listConnections('{}.target'.format(self), d=False)
+        for index, target in enumerate(spaceTargets):
+            targetData = {}
+            targetData['attrName']    = cmds.getAttr('{}.target[{}].attrName'.format(self, index))
+            targetData['spaceTarget'] = target
+            targetWidgets[index] = targetData
+            
+        return targetWidgets
+        
+    @target.setter
+    def target(self, data):
+        for index, widget in enumerate(data.values()):
+            target = widget['spaceTarget']
+            cmds.connectAttr('{}.message'.format(target), '{}.target[{}].spaceTarget'.format(self, index), f=True)
+            attrName = widget['attrName']
+            cmds.setAttr('{}.target[{}].attrName'.format(self, index), attrName, typ="string")
+            
+    @property        
+    def spaceLocs(self):
+        return cmds.listConnections('{}.spaceLocs'.format(self), d=False) or []
+        
+    @spaceLocs.setter
+    def spaceLocs(self, data):
+        offsetGroup, targets = data
+        _targets = [value['spaceTarget'] for value in targets.values()]
 
-# ---------------------------------------------------------------------------------------------------------    
+        for target in _targets:
+            #locName = MetaUtils.uniqueName('{}_{}_spaceSwitch_LOC'.format(self.source.split('|')[-1], target.split('|')[-1]))
+            locName = MetaUtils.uniqueName('{}_spaceSwitch_LOC'.format(self.source.split('|')[-1]))
+            loc = cmds.createNode('transform', name=locName)
+            cmds.parent(loc, target)
+            cmds.matchTransform(loc, offsetGroup)
+            MetaUtils.connectMiAttr(loc, 'message', self, 'spaceLocs')
+                
+    @property
+    def constraints(self):
+        _constraints = []
+        childAttrs = cmds.attributeQuery('constraints', node=self, listChildren=True)
+        for attr in childAttrs:
+            cons = cmds.listConnections('{}.constraints.{}'.format(self, attr), d=False)
+            if cons is None:
+                continue
+            _constraints.append(cons[0])
+        return _constraints
+        
+    @constraints.setter
+    def constraints(self, data):
+        types, offsetGroup, spaceLoc = data
+        conTypes = [i for i in types if types[i]]
+        for conType in conTypes:
+            if conType == 'point':
+                c = cmds.pointConstraint(spaceLoc, offsetGroup, mo=True)[0]
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.pointConstraint'.format(self), f=True)
+            elif conType == 'orient':
+                c = cmds.orientConstraint(spaceLoc, offsetGroup, mo=True)[0]
+                cmds.setAttr('{}.interpType'.format(c), 2)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.orientConstraint'.format(self), f=True)
+            elif conType == 'scale':
+                c = cmds.scaleConstraint(spaceLoc, offsetGroup, mo=True)[0]
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.scaleConstraint'.format(self), f=True)
+            elif conType == 'parent':
+                c = cmds.parentConstraint(spaceLoc, offsetGroup, mo=True)[0]
+                cmds.setAttr('{}.interpType'.format(c), 2)
+                cmds.connectAttr('{}.message'.format(c), '{}.constraints.parentConstraint'.format(self), f=True)
+                
+    # -----------------------------------------------------------------------------------------
+    @property
+    def conType(self):
+        conTypeDic = {}
+        # get childs attr name
+        childAttrs = cmds.attributeQuery('constraints', node=self, listChildren=True)
+        for attr in childAttrs:
+            value = bool(cmds.listConnections('{}.constraints.{}'.format(self, attr)))
+            conTypeDic[attr.split('Constraint')[0]] = value
+        return conTypeDic
+        
+    def createAttr(self, ctrl, targets):
+        attrNames = [value['attrName'] for value in targets.values()]
+        if cmds.attributeQuery('spaceSwitch', node=ctrl, ex=True):
+            cmds.deleteAttr('{}.spaceSwitch'.format(ctrl))
+        cmds.addAttr(ctrl, ln='spaceSwitch', at='enum', k=True, en=':'.join(attrNames))
+    
+    # -----------------------------------------------------------------------------------------------
+    @property
+    def conditionNodes(self):
+        return cmds.listConnections('{}.conditionNodes'.format(self), d=False) or []
+            
+    def createConditionNode(self, ctrl, constraints):
+        for cons in constraints:
+            for index, loc in enumerate(self.spaceLocs):
+                condNodeName = MetaUtils.uniqueName('{}_condition'.format(loc.split('|')[-1]))
+                condNode = cmds.createNode('condition', name=condNodeName)
+                cmds.setAttr('{}.colorIfTrueR'.format(condNode), 1)
+                cmds.setAttr('{}.colorIfFalseR'.format(condNode), 0)
+                cmds.setAttr('{}.secondTerm'.format(condNode), index)
+                cmds.connectAttr('{}.spaceSwitch'.format(ctrl),   '{}.firstTerm'.format(condNode), f=True)
+                cmds.connectAttr('{}.outColorR'.format(condNode), '{}.{}W{}'.format(cons, loc, index), f=True)
+                MetaUtils.connectMiAttr(condNode, 'message', self, 'conditionNodes')
+                
+    @property    
+    def offsetGroupMatrix(self):
+        return cmds.getAttr('{}.offsetGroupLocalMatrix'.format(self))
+
+    @offsetGroupMatrix.setter
+    def offsetGroupMatrix(self, inMatrix):
+        cmds.setAttr('{}.offsetGroupLocalMatrix'.format(self), inMatrix, typ='matrix')
+    # -----------------------------------------------------------------------------------------
+        
+    @property
+    def nodeData(self):
+        _nodeData = {}
+        _nodeData['source']        = self.source
+        _nodeData['offsetGroup']   = self.offsetGroup
+        _nodeData['conType']       = self.conType
+        _nodeData['targetWidgets'] = self.target
+        return _nodeData
+        
+    @nodeData.setter    
+    def nodeData(self, data):
+        self.source = data['source']
+        self.offsetGroup = data['offsetGroup']
+        self.target = data['targetWidgets']
+        self.spaceLocs = (self.offsetGroup, self.target)
+        self.offsetGroupMatrix = cmds.xform(self.offsetGroup, q=True, m=True, ws=False)
+        
+        self.constraints = (data['conType'], self.offsetGroup, self.spaceLocs)
+        self.createAttr(self.source, self.target)
+        self.createConditionNode(self.source, self.constraints)
+        cmds.select(self.source, ne=True)
+        
+    @nodeData.deleter    
+    def nodeData(self):
+        cmds.delete(self.conditionNodes, 
+                    self.constraints,
+                    self.spaceLocs)
+        if cmds.attributeQuery('spaceSwitch', node=self.source, ex=True):
+            cmds.deleteAttr('{}.spaceSwitch'.format(self.source))
+        cmds.xform(self.offsetGroup, m=self.offsetGroupMatrix, ws=False)
+        cmds.delete(self)
+
+'''
+data =  {'source': 'joint1', 
+         'offsetGroup': 'joint1_str', 
+         'conType': {'point': False, 'orient': False, 'scale': True, 'parent': True}, 
+         'targetWidgets': {0: {'attrName': 'ikk', 'spaceTarget': 'ik'}, 
+                           1: {'attrName': 'fkk', 'spaceTarget': 'fk'}}} #        
+
+node = SpaceSwitchMeta('woshikangddan')
+node.nodeData = data
+node.nodeData
+del node.nodeData
+nodes = MetaUtils.getMetaNodes()
+'''
+
 class LineShape(QtWidgets.QFrame):
     def __init__(self):
         super(LineShape, self).__init__()
@@ -304,7 +334,7 @@ class TargetWidget(QtWidgets.QWidget):
         self.createWidgets()
         self.createLayouts()
         self.createConnections()
-        self.spaceTargetUUID = None
+        self.spaceTargetLong = None
         
     def setWidgetColor(self, count):
         if count % 2 == 0:
@@ -350,21 +380,25 @@ class TargetWidget(QtWidgets.QWidget):
         self.spaceBut.clicked.connect(self.addSpaceTargetNode)
 
     def addSpaceTargetNode(self):
-        sel = cmds.ls(sl=True, long=True)
+        sel = getSelection()
+
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
+        if isinstance(sel[0], om2.MFnDependencyNode):
+            return om2.MGlobal.displayWarning('Please select an DAGNode')
         
-        self.spaceTargetLine.setText(sel[0].split('|')[-1])
-        self.spaceTargetUUID = cmds.ls(sel[0], uid=True)[0]
+        self.spaceTargetLine.setText(sel[0].fullPathName().split('|')[-1])
+        self.spaceTargetLong = sel[0].fullPathName()
         
     def getWidgetData(self):
         return {'attrName':self.attrNameLine.text(),
-                'spaceTarget':self.spaceTargetUUID }
+                'spaceTarget':self.spaceTargetLong }
+                
     def setWidgetData(self, data):
         self.attrNameLine.setText(data.get('attrName'))
  
-        self.spaceTargetLine.setText(cmds.ls(data.get('spaceTarget'))[0])
-        self.spaceTargetUUID = data.get('spaceTarget')
+        self.spaceTargetLine.setText(data.get('spaceTarget'))
+        self.spaceTargetLong = data.get('spaceTarget')
         
 
 class SpaceSwitchUI(QtWidgets.QDialog):
@@ -383,8 +417,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.targetsBox.clear()
         self.targetsBox.addItem('<New>')
         
-        for nodeName in metaNodes:
-            self.targetsBox.addItem(nodeName, MetaNode(nodeName)) # metaNode instance to data
+        for metaNode in metaNodes:
+            self.targetsBox.addItem(metaNode.path, metaNode) # metaNode instance to data
 
         self.updateData()
         
@@ -399,15 +433,15 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
         self.positionCheckBox.setEnabled(True)
         self.rotationCheckBox.setEnabled(True)
-        self.sourceUUID = None
-        self.offsetGroupUUID = None
+        self.sourceLong = None
+        self.offsetGroupLong = None
         
     def updateData(self):
         currentIndex = self.targetsBox.currentIndex()
         itemData = self.targetsBox.itemData(currentIndex)
-        if itemData is not None and isinstance(itemData, MetaNode):
-            self.setWidgetData(itemData.getData()) # get metaNode instance data
-            cmds.select(itemData.source[0], ne=True)
+        if itemData is not None and isinstance(itemData, SpaceSwitchMeta):
+            self.setWidgetData(itemData.nodeData) # get metaNode instance data
+            cmds.select(itemData.source, ne=True)
         else:   
             self.resetData()
             #cmds.select(cl=True)
@@ -417,7 +451,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     def closeEvent(self, event):
         super(SpaceSwitchUI, self).closeEvent(event)
         self.geometry = self.saveGeometry()
-        #self.getMeta()
+
         
     @classmethod
     def displayUI(cls):
@@ -444,8 +478,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.createWidgets()
         self.createLayouts()
         self.createConnections()
-        self.sourceUUID = None
-        self.offsetGroupUUID = None
+        self.sourceLong = None
+        self.offsetGroupLong = None
         self.getMeta()
         
     def createLayouts(self):
@@ -581,8 +615,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             self.targetsBox.setCurrentIndex(index)
             
             itemData = self.targetsBox.itemData(index)
-            if itemData is not None and isinstance(itemData, MetaNode):
-                self.setWidgetData(itemData.getData()) # get metaNode instance data
+            if itemData is not None and isinstance(itemData, SpaceSwitchMeta):
+                self.setWidgetData(itemData.nodeData) # get metaNode instance data
     # --------------------------------------------------------------------------    
 
     def parentTo(self):
@@ -607,28 +641,31 @@ class SpaceSwitchUI(QtWidgets.QDialog):
                 #pass
         
     def addSourceNode(self):
-        sel = cmds.ls(sl=True, long=True)
+        sel = getSelection()
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
         
-        self.sourceLineEdit.setText(sel[0].split('|')[-1])
-        self.sourceUUID = cmds.ls(sel[0], uid=True)[0]
+        self.sourceLineEdit.setText(sel[0].fullPathName().split('|')[-1])
+        self.sourceLong = sel[0].fullPathName()
         
         parent = cmds.listRelatives(sel[0], p=True, f=True) # add parent name
         if parent:
             self.offsetGroupLineEdit.setText(parent[0].split('|')[-1])
-            self.offsetGroupUUID = cmds.ls(parent[0], uid=True)[0]
+            self.offsetGroupLong = parent[0]
         else:
             self.offsetGroupLineEdit.setText('')
-            self.offsetGroupUUID = None
+            self.offsetGroupLong = None
             
     def addOffsetGroupNode(self):
-        sel = cmds.ls(sl=True, long=True)
+        sel = getSelection()
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
         
-        self.offsetGroupLineEdit.setText(sel[0].split('|')[-1])
-        self.offsetGroupUUID = cmds.ls(sel[0], uid=True)[0]
+        if isinstance(sel[0], om2.MFnDependencyNode):
+            return om2.MGlobal.displayWarning('Please select an DAGNode')
+        
+        self.offsetGroupLineEdit.setText(sel[0].fullPathName().split('|')[-1])
+        self.offsetGroupLong = sel[0].fullPathName()
     # --------------------------------------------------------------------------
     def addTargetWidget(self, data=None):
         count = self.targetsLayout.count()
@@ -665,10 +702,10 @@ class SpaceSwitchUI(QtWidgets.QDialog):
 
     def getWidgetData(self):
         data = {}
-        data['source']      = self.sourceUUID
-        data['offsetGroup'] = self.offsetGroupUUID
-        data['conType']     = {'position':self.positionCheckBox.isChecked(),
-                               'rotation':self.rotationCheckBox.isChecked(),
+        data['source']      = self.sourceLong
+        data['offsetGroup'] = self.offsetGroupLong
+        data['conType']     = {'point':self.positionCheckBox.isChecked(),
+                               'orient':self.rotationCheckBox.isChecked(),
                                'scale'   :self.scaleCheckBox.isChecked(),
                                'parent'  :self.parentCheckBox.isChecked()}
                                
@@ -681,22 +718,22 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
     def setWidgetData(self, data):
 
-        self.sourceLineEdit.setText(cmds.ls(data.get('source'))[0])
-        self.sourceUUID = data.get('source')
-        self.offsetGroupLineEdit.setText(cmds.ls(data.get('offsetGroup'))[0])
-        self.offsetGroupUUID = data.get('offsetGroup')
+        self.sourceLineEdit.setText(data.get('source').split('|')[-1])
+        self.sourceLong = data.get('source')
+        self.offsetGroupLineEdit.setText(data.get('offsetGroup').split('|')[-1])
+        self.offsetGroupLong = data.get('offsetGroup')
         
         # ------------------------------------------------------------------------
 
-        self.positionCheckBox.setChecked(data.get('conType')['position'])
-        self.rotationCheckBox.setChecked(data.get('conType')['rotation'])
+        self.positionCheckBox.setChecked(data.get('conType')['point'])
+        self.rotationCheckBox.setChecked(data.get('conType')['orient'])
         self.scaleCheckBox.setChecked(data.get('conType')['scale'])
         self.parentCheckBox.setChecked(data.get('conType')['parent'])
         
         # --------------------------------------------------
         # update checkbox state
-        self.pBoxState = data.get('conType')['position']
-        self.rBoxState = data.get('conType')['rotation']
+        self.pBoxState = data.get('conType')['point']
+        self.rBoxState = data.get('conType')['orient']
         self.parentTo()
         
         # ------------------------------------------------------------------------
@@ -707,18 +744,11 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             
     # --------------------------------------------------------------------------------
     def deleteTargetItemAndMeta(self):
-        '''
-        itemText = self.targetsBox.currentText() 
-        if itemText in MetaUtils.getMetaNodes():
-            MetaNode(itemText).deleteMeta()
-            index = self.targetsBox.findText(itemText)
-            if index != -1: 
-                self.targetsBox.removeItem(index)
-        ''' 
+
         currentIndex = self.targetsBox.currentIndex()      
         itemData = self.targetsBox.itemData(currentIndex)
-        if itemData is not None and isinstance(itemData, MetaNode):
-            itemData.deleteMeta()
+        if itemData is not None and isinstance(itemData, SpaceSwitchMeta):
+            del itemData.nodeData
             self.targetsBox.removeItem(currentIndex)
             
     # -----------------------------------------------------------------------------       
@@ -774,17 +804,16 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         data = self.getWidgetData()
         if not self.checkData(data):
             return
-        
+        #print(data)
         # ---------------------------------------------------------------- 
         self.deleteTargetItemAndMeta()
-        
+ 
         # ----------------------------------------------------------------
-        # uuid to string
-        sourceFullPathName = cmds.ls(data['source'])[0]
-        metaNodeInstance  = MetaNode(MetaUtils.createMetaNode(sourceFullPathName))
-        metaNodeInstance.setData(data)
-        self.targetsBox.addItem(metaNodeInstance.node, metaNodeInstance) # add instance to item data
-        self.targetsBox.setCurrentText(metaNodeInstance.node)
+        metaNodeName = MetaUtils.uniqueName('{}_spaceSwitch_META'.format(data['source'].split('|')[-1]))
+        metaNodeInstance = SpaceSwitchMeta(metaNodeName)
+        metaNodeInstance.nodeData = data
+        self.targetsBox.addItem(metaNodeInstance.path, metaNodeInstance) # add instance to item data
+        self.targetsBox.setCurrentText(metaNodeInstance.path)
       
     @addUndo  
     def deleteSpaceSwitch(self):
@@ -795,3 +824,4 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
+
