@@ -27,6 +27,15 @@ def getSelection():
             if sel.getDependNode(i).hasFn(om2.MFn.kDagNode) 
             else om2.MFnDependencyNode(sel.getDependNode(i)) 
             for i in range(sel.length())]
+            
+def getNodeLongName(obj):
+    '''
+    return: name, longName
+    '''
+    if isinstance(obj, om2.MFnDependencyNode):
+        return obj.name(), obj.name()
+    else:
+        return obj.fullPathName().split('|')[-1], obj.fullPathName()
 
         
 class MetaUtils(object):
@@ -146,7 +155,7 @@ class SpaceSwitchMeta(object):
     @property
     def source(self):
         source = cmds.listConnections('{}.source'.format(self), d=False)
-        return source[0] if source else None
+        return cmds.ls(source[0], long=True)[0] if source else None
     
     @source.setter
     def source(self, obj):
@@ -155,7 +164,7 @@ class SpaceSwitchMeta(object):
     @property
     def offsetGroup(self):
         offsetGroup = cmds.listConnections('{}.offsetGroup'.format(self), d=False)
-        return offsetGroup[0] if offsetGroup else None
+        return cmds.ls(offsetGroup[0], long=True)[0] if offsetGroup else None
     
     @offsetGroup.setter
     def offsetGroup(self, obj):
@@ -167,6 +176,7 @@ class SpaceSwitchMeta(object):
         targetWidgets = {}
         # get target count
         spaceTargets = cmds.listConnections('{}.target'.format(self), d=False)
+        #print(spaceTargets)
         for index, target in enumerate(spaceTargets):
             targetData = {}
             targetData['attrName']    = cmds.getAttr('{}.target[{}].attrName'.format(self, index))
@@ -386,10 +396,11 @@ class TargetWidget(QtWidgets.QWidget):
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
         if isinstance(sel[0], om2.MFnDependencyNode):
-            return om2.MGlobal.displayWarning('Please select an DAGNode')
-        
-        self.spaceTargetLine.setText(sel[0].fullPathName().split('|')[-1])
-        self.spaceTargetLong = sel[0].fullPathName()
+            return om2.MGlobal.displayWarning('Please select an dagNode')
+            
+        name, longName = getNodeLongName(sel[0])
+        self.spaceTargetLine.setText(name)
+        self.spaceTargetLong = longName
         
     def getWidgetData(self):
         return {'attrName':self.attrNameLine.text(),
@@ -397,8 +408,8 @@ class TargetWidget(QtWidgets.QWidget):
                 
     def setWidgetData(self, data):
         self.attrNameLine.setText(data.get('attrName'))
- 
-        self.spaceTargetLine.setText(data.get('spaceTarget'))
+        
+        self.spaceTargetLine.setText(data.get('spaceTarget').split('|')[-1])
         self.spaceTargetLong = data.get('spaceTarget')
         
 
@@ -422,14 +433,27 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         
     # --------------------------------------------------------    
     def createScriptJobs(self):
+        #print('create')
         self.scriptJobs.append(cmds.scriptJob(event=['NewSceneOpened', partial(self.getMeta)], pro=True)) # new scene
         self.scriptJobs.append(cmds.scriptJob(event=['PostSceneRead', partial(self.getMeta)], pro=True))  # open scene
+        self.scriptJobs.append(cmds.scriptJob(event=['Undo', partial(self.undoUpdate)], pro=True))  # undo
         
     def deleteScriptJobs(self):
+        #print('delete')
         for jobNumber in self.scriptJobs:
             cmds.evalDeferred('if cmds.scriptJob(exists={0}):\tcmds.scriptJob(kill={0}, force=True)'.format(jobNumber))   
         self.scriptJobs = [] 
-    
+    # --------------------------------------------------------  
+    def undoUpdate(self):
+        TargetBoxitemDatas = [self.targetsBox.itemData(i) 
+                              for i in range(self.targetsBox.count())
+                              if isinstance(self.targetsBox.itemData(i), SpaceSwitchMeta)]
+                              
+        metaNodes = MetaUtils.getMetaNodes()
+        if not set(TargetBoxitemDatas) == set(metaNodes):
+            #print('start undo')
+            self._updateUI_()
+
     def getMeta(self):
         metaNodes = MetaUtils.getMetaNodes()
         self.targetsBox.clear()
@@ -463,6 +487,27 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         else:   
             self.resetData()
             #cmds.select(cl=True)
+    
+    def parentTo(self):
+        isParent = self.parentCheckBox.isChecked()
+        if isParent:
+            # get conscheckbox state
+            self.pBoxState = self.positionCheckBox.isChecked()
+            self.rBoxState = self.rotationCheckBox.isChecked()
+            
+            self.positionCheckBox.setChecked(False)
+            self.positionCheckBox.setEnabled(False)
+            self.rotationCheckBox.setChecked(False)
+            self.rotationCheckBox.setEnabled(False)
+            
+        else:
+            #try:
+            self.positionCheckBox.setChecked(self.pBoxState)
+            self.positionCheckBox.setEnabled(True)
+            self.rotationCheckBox.setChecked(self.rBoxState)
+            self.rotationCheckBox.setEnabled(True)
+            #except:
+                #pass
     
     # --------------------------------------------------------
         
@@ -621,67 +666,77 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         #self.shortcut.activated.connect(self._updateUI_)
         self.updateBut.clicked.connect(self._updateUI_)
         
+    # ----------------------------------------------------------------    
     def _updateUI_(self):
         itemText = self.targetsBox.currentText() 
         self.getMeta()
         
         # select item
-        if itemText in [self.targetsBox.itemText(i) for i in range(self.targetsBox.count())]:
+        self.textToItemWidget(itemText)
+    
+    def textToItemWidget(self, itemText):
+        itemTexts = [self.targetsBox.itemText(i) for i in range(self.targetsBox.count())]
+        
+        if itemText in itemTexts:
             index = self.targetsBox.findText(itemText)
             self.targetsBox.setCurrentIndex(index)
             
             itemData = self.targetsBox.itemData(index)
             if itemData is not None and isinstance(itemData, SpaceSwitchMeta):
                 self.setWidgetData(itemData.nodeData) # get metaNode instance data
+                return True
+        return          
     # --------------------------------------------------------------------------    
-
-    def parentTo(self):
-        isParent = self.parentCheckBox.isChecked()
-        if isParent:
-            # get conscheckbox state
-            self.pBoxState = self.positionCheckBox.isChecked()
-            self.rBoxState = self.rotationCheckBox.isChecked()
-            
-            self.positionCheckBox.setChecked(False)
-            self.positionCheckBox.setEnabled(False)
-            self.rotationCheckBox.setChecked(False)
-            self.rotationCheckBox.setEnabled(False)
-            
-        else:
-            #try:
-            self.positionCheckBox.setChecked(self.pBoxState)
-            self.positionCheckBox.setEnabled(True)
-            self.rotationCheckBox.setChecked(self.rBoxState)
-            self.rotationCheckBox.setEnabled(True)
-            #except:
-                #pass
-        
+    def metaExists(self, obj):
+        if not cmds.attributeQuery('spaceSwitch', node=obj, ex=True):
+            return 
+        outputs = cmds.listConnections('{}.message'.format(obj), s=False) or []
+        if not outputs:
+            return 
+        # -------------------------------------------------------------------------------------    
+        metaNodeStrs = [m.path for m in MetaUtils.getMetaNodes()]
+        for node in outputs:
+            if node not in metaNodeStrs:
+                continue
+            metaNodeName = metaNodeStrs[metaNodeStrs.index(node)]
+            return self.textToItemWidget(metaNodeName)
+        # -------------------------------------------------------------------------------------  
+        return 
+                
     def addSourceNode(self):
         sel = getSelection()
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
+            
+        name, longName = getNodeLongName(sel[0])
         
-        self.sourceLineEdit.setText(sel[0].fullPathName().split('|')[-1])
-        self.sourceLong = sel[0].fullPathName()
         
-        parent = cmds.listRelatives(sel[0], p=True, f=True) # add parent name
+        if self.metaExists(longName):
+            return
+        # -------------------------------------------------------
+        self.sourceLineEdit.setText(name)
+        self.sourceLong = longName
+        
+        if isinstance(sel[0], om2.MFnDependencyNode):
+            return
+        parent = cmds.listRelatives(longName, p=True, f=True) # get parent longName
         if parent:
             self.offsetGroupLineEdit.setText(parent[0].split('|')[-1])
             self.offsetGroupLong = parent[0]
-        else:
-            self.offsetGroupLineEdit.setText('')
-            self.offsetGroupLong = None
-            
+        
+    # -------------------------------------------------------------------------- 
+    
     def addOffsetGroupNode(self):
         sel = getSelection()
         if not sel:
             return om2.MGlobal.displayWarning('Please select an object')
         
         if isinstance(sel[0], om2.MFnDependencyNode):
-            return om2.MGlobal.displayWarning('Please select an DAGNode')
-        
-        self.offsetGroupLineEdit.setText(sel[0].fullPathName().split('|')[-1])
-        self.offsetGroupLong = sel[0].fullPathName()
+            return om2.MGlobal.displayWarning('Please select an dagNode')
+            
+        name, longName = getNodeLongName(sel[0])
+        self.offsetGroupLineEdit.setText(name)
+        self.offsetGroupLong = longName
     # --------------------------------------------------------------------------
     def addTargetWidget(self, data=None):
         count = self.targetsLayout.count()
@@ -715,7 +770,6 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         return targetWidgets
         
     # ---------------------------------------------------------------
-
     def getWidgetData(self):
         data = {}
         data['source']      = self.sourceLong
@@ -818,9 +872,10 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     @addUndo        
     def createSpaceSwitch(self): 
         data = self.getWidgetData()
+  
         if not self.checkData(data):
             return
-        #print(data)
+
         # ---------------------------------------------------------------- 
         self.deleteTargetItemAndMeta()
  
