@@ -3,6 +3,7 @@ import maya.api.OpenMaya as om2
 import PySide2.QtWidgets as QtWidgets
 import PySide2.QtCore    as QtCore
 import PySide2.QtGui     as QtGui
+from functools import partial
 
 def addUndo(func):
     def undo(*args, **kwargs):
@@ -408,9 +409,26 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         if self.geometry:
             self.restoreGeometry(self.geometry)
         #self.getMeta()
+        if self.openUI:
+            self.createScriptJobs()
+            self.openUI = False
         super(SpaceSwitchUI, self).showEvent(event)
         
+    def closeEvent(self, event):
+        super(SpaceSwitchUI, self).closeEvent(event)
+        self.geometry = self.saveGeometry()
+        self.deleteScriptJobs()
+        self.openUI = True
+        
     # --------------------------------------------------------    
+    def createScriptJobs(self):
+        self.scriptJobs.append(cmds.scriptJob(event=['NewSceneOpened', partial(self.getMeta)], pro=True)) # new scene
+        self.scriptJobs.append(cmds.scriptJob(event=['PostSceneRead', partial(self.getMeta)], pro=True))  # open scene
+        
+    def deleteScriptJobs(self):
+        for jobNumber in self.scriptJobs:
+            cmds.evalDeferred('if cmds.scriptJob(exists={0}):\tcmds.scriptJob(kill={0}, force=True)'.format(jobNumber))   
+        self.scriptJobs = [] 
     
     def getMeta(self):
         metaNodes = MetaUtils.getMetaNodes()
@@ -447,11 +465,6 @@ class SpaceSwitchUI(QtWidgets.QDialog):
             #cmds.select(cl=True)
     
     # --------------------------------------------------------
-            
-    def closeEvent(self, event):
-        super(SpaceSwitchUI, self).closeEvent(event)
-        self.geometry = self.saveGeometry()
-
         
     @classmethod
     def displayUI(cls):
@@ -481,6 +494,9 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.sourceLong = None
         self.offsetGroupLong = None
         self.getMeta()
+        
+        self.openUI = True
+        self.scriptJobs = []
         
     def createLayouts(self):
         mainLayout = QtWidgets.QVBoxLayout(self)
@@ -572,8 +588,8 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         self.removeBut.setFixedHeight(30)
         
         # ----------------------------------------
-        self.positionCheckBox = QtWidgets.QCheckBox('Position')
-        self.rotationCheckBox = QtWidgets.QCheckBox('Rotation')
+        self.positionCheckBox = QtWidgets.QCheckBox('point')
+        self.rotationCheckBox = QtWidgets.QCheckBox('orient')
         self.scaleCheckBox = QtWidgets.QCheckBox('Scale')
         self.parentCheckBox = QtWidgets.QCheckBox('Parent')
         
@@ -824,4 +840,3 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
-
