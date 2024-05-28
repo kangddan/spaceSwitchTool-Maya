@@ -42,7 +42,7 @@ class MetaUtils(object):
     
     @staticmethod
     def createMetaNode(nodeName, nodeType):
-        metaNode = cmds.createNode(nodeType, name=nodeName.format(nodeName))
+        metaNode = cmds.createNode(nodeType, name=nodeName)
         # ----------------------------------------------------
         cmds.addAttr(metaNode, ln='metaClass', dt='string')
         cmds.setAttr('{}.metaClass'.format(metaNode), 'SpaceSwitch', typ='string')
@@ -62,6 +62,9 @@ class MetaUtils(object):
         # ----------------------------------------------------
         cmds.addAttr(metaNode, ln='spaceLocs', dt='string', m=True)
         cmds.addAttr(metaNode, ln='conditionNodes', dt='string', m=True)
+        # cmds.addAttr(metaNode, ln='spaceLocs', at='message', m=True)
+        # cmds.addAttr(metaNode, ln='conditionNodes', at='message', m=True)
+        
         cmds.addAttr(metaNode, ln='offsetGroupLocalMatrix', dt="matrix")
         return metaNode
     
@@ -132,7 +135,7 @@ class SpaceSwitchMeta(object):
         return self.path
         
     def __repr__(self):
-        return "<SpaceSwitchMeta |'{}'>".format(self.node.name())
+        return "<SpaceSwitchMeta |'{}'>".format(self.path)
         
     @classmethod
     def _create(cls, nodeName, nodeType):
@@ -482,7 +485,7 @@ class SpaceSwitchUI(QtWidgets.QDialog):
         currentIndex = self.targetsBox.currentIndex()
         itemData = self.targetsBox.itemData(currentIndex)
         if itemData is not None and isinstance(itemData, SpaceSwitchMeta):
-            self.setWidgetData(itemData.nodeData) # get metaNode instance data
+            self.setWidgetData(itemData.nodeData) # set metaNode instance data
             cmds.select(itemData.source, ne=True)
         else:   
             self.resetData()
@@ -895,3 +898,10 @@ class SpaceSwitchUI(QtWidgets.QDialog):
     
 if __name__ == '__main__':
     SpaceSwitchUI.displayUI()
+
+'''
+code by kangddan
+https://github.com/kangddan
+https://space.bilibili.com/174575687
+https://animator.at8.fun/
+'''
