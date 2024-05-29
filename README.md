@@ -4,7 +4,7 @@
 
 打开脚本编辑器输入以下代码 
 
-` from namingTool import NamingToolUI`
+` from spaceSwitchTool import SpaceSwitchUI`
 
-`NamingToolUI.UIDisplay() ` 
+`SpaceSwitchUI.displayUI() ` 
 
